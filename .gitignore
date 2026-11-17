@@ -1,0 +1,26 @@
+# macOS metadata
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100/
+.Trashes/
+.fseventsd/
+.VolumeIcon.icns
+
+# Claude local settings and instructions
+.claude/
+CLAUDE.md
+CLAUDE.local.md
+.mcp.json
+
+# Codex local settings and instructions
+.codex/
+AGENTS.md
+AGENTS.override.md
+
+# Local API keys and environment configuration
+.env
+.env.*
+!.env.example
+!.env.sample
