@@ -24,3 +24,10 @@ AGENTS.override.md
 .env.*
 !.env.example
 !.env.sample
+
+# Python runtime and generated demo data
+__pycache__/
+*.pyc
+.venv/
+data/*
+!data/seed/
