@@ -2,6 +2,7 @@
 
 import json
 import os
+import urllib.error
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
@@ -68,6 +69,14 @@ def make_handler(service):
                 self.reply(result)
             except (ValueError, KeyError, TypeError) as error:
                 self.reply({"error": str(error)}, 400)
+            except (urllib.error.URLError, TimeoutError):
+                self.reply(
+                    {
+                        "error": "LLM 서버에 연결하지 못했습니다. Ollama가 실행 중인지, "
+                        "모델을 받았는지(ollama pull) 확인하세요. 이미 실행된 행동은 DB에서 확인하세요."
+                    },
+                    503,
+                )
             except Exception:
                 # Do not expose provider responses or credentials through HTTP errors.
                 self.reply(

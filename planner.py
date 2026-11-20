@@ -3,16 +3,79 @@
 import json
 import os
 import urllib.request
+from urllib.parse import urlparse
 
 from service import TOOLS
 
+# Default: a local Ollama server (OpenAI-compatible endpoint). No API key, no cost.
+DEFAULT_CHAT_URL = "http://localhost:11434/v1/chat/completions"
+DEFAULT_MODEL = "qwen2.5:3b"
+LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
+
+
+def llm_config():
+    """Read the model endpoint from the environment and validate it."""
+    url = os.environ.get("LLM_CHAT_URL") or DEFAULT_CHAT_URL
+    model = os.environ.get("LLM_MODEL") or DEFAULT_MODEL
+    key = os.environ.get("LLM_API_KEY") or None
+    parsed = urlparse(url)
+    local = parsed.hostname in LOCAL_HOSTS
+    # Plain HTTP only to this machine; any remote endpoint must use HTTPS and a key.
+    if parsed.scheme not in ("http", "https") or (parsed.scheme == "http" and not local):
+        raise ValueError("LLM_CHAT_URL must be https://, or http:// on localhost")
+    if not local and not key:
+        raise ValueError("A remote LLM_CHAT_URL needs LLM_API_KEY")
+    temperature = os.environ.get("LLM_TEMPERATURE")
+    try:
+        timeout = float(os.environ.get("LLM_TIMEOUT") or (180 if local else 45))
+        temperature = float(temperature) if temperature not in (None, "") else None
+    except ValueError as error:
+        raise ValueError("LLM_TIMEOUT and LLM_TEMPERATURE must be numbers") from error
+    return {"url": url, "model": model, "key": key, "local": local,
+            "timeout": timeout, "temperature": temperature}
+
+
+def local_model_info(config):
+    """Ollama model metadata (digest, size, quantization) for the ML-BOM, or None."""
+    if not config["local"]:
+        return None
+    parsed = urlparse(config["url"])
+    tags_url = f"{parsed.scheme}://{parsed.netloc}/api/tags"
+    try:
+        with urllib.request.urlopen(tags_url, timeout=5) as response:
+            models = json.load(response).get("models", [])
+    except (OSError, ValueError):
+        return None
+    wanted = config["model"] if ":" in config["model"] else config["model"] + ":latest"
+    for item in models:
+        if item.get("name") == wanted or item.get("model") == wanted:
+            details = item.get("details") or {}
+            return {
+                "name": item.get("name"),
+                "digest": item.get("digest"),
+                "size_bytes": item.get("size"),
+                "format": details.get("format"),
+                "family": details.get("family"),
+                "parameter_size": details.get("parameter_size"),
+                "quantization": details.get("quantization_level"),
+                "modified_at": item.get("modified_at"),
+            }
+    return {"name": wanted, "missing": True, "available": [m.get("name") for m in models]}
+
 TASK_REQUEST = (
     "Prepare A's onboarding to Alpha as a member. Read the selected related mail "
-    "for the welcome meeting time and preparation notes. Create a private event "
-    "for M, prepare an informational welcome email to A, and request A's Alpha "
-    "member access. Sending and granting access require separate operator approval. "
-    "If required details are missing or conflicting, ask M instead of guessing."
+    "for the welcome meeting time and preparation notes. Then call the tools: "
+    "create_event for owner M at the meeting time (ISO 8601 with +09:00, e.g. "
+    "2026-11-23T15:00:00+09:00), send_email with an informational welcome email to "
+    "A at a@example.test, and grant_access for A on Alpha as member. Describing an "
+    "action is not doing it: call the tool. Sending and granting access require "
+    "separate operator approval. If required details are missing or conflicting, "
+    "ask M instead of guessing."
 )
+REQUIRED_TOOLS = ("create_event", "send_email", "grant_access")
+MAX_MODEL_CALLS_PER_RUN = 6
+MAX_MODEL_CALLS_PER_SESSION = 30
+MAX_REMINDERS = 2
 
 
 def run_onboarding(service, mail, mode, mail_id):
@@ -21,6 +84,7 @@ def run_onboarding(service, mail, mode, mail_id):
             "SELECT context FROM tasks WHERE id = ?", ("onboard",)
         ).fetchone()[0]
     )
+    run_id = service.begin_run()
     actions = []
     results = []
 
@@ -42,6 +106,7 @@ def run_onboarding(service, mail, mode, mail_id):
         if "November 23 at 15:00" not in mail:
             return {
                 "mode": "fixture",
+                "run_id": run_id,
                 "actions": actions,
                 "results": results,
                 "text": "모의 모드는 예시 메일만 지원합니다. 수정한 문장의 이해는 실제 LLM 모드로 시험하세요.",
@@ -78,6 +143,7 @@ def run_onboarding(service, mail, mode, mail_id):
         )
         return {
             "mode": "fixture — NOT real AI evidence",
+            "run_id": run_id,
             "actions": actions,
             "results": results,
             "text": "모의 행동 생성 완료. 메일 발송과 권한 변경은 각각 승인해야 합니다.",
@@ -85,11 +151,8 @@ def run_onboarding(service, mail, mode, mail_id):
 
     if mode != "api":
         raise ValueError("Unknown mode")
-    key = os.environ.get("LLM_API_KEY")
-    model = os.environ.get("LLM_MODEL")
-    url = os.environ.get("LLM_CHAT_URL")
-    if not all((key, model, url)) or not url.startswith("https://"):
-        raise ValueError("Set LLM_API_KEY, LLM_MODEL, and an HTTPS LLM_CHAT_URL")
+    config = llm_config()
+    model = config["model"]
     schemas = [
         {
             "type": "function",
@@ -132,6 +195,7 @@ def run_onboarding(service, mail, mode, mail_id):
     messages.append(
         {
             "role": "assistant",
+            "content": "",
             "tool_calls": [
                 {
                     "id": "initial_mail",
@@ -149,9 +213,11 @@ def run_onboarding(service, mail, mode, mail_id):
     )
     seen = set()
     text = "Stopped at the planning limit; inspect action statuses."
-    for _ in range(4):
-        if service.calls >= 10:
+    reminders = 0
+    for _ in range(MAX_MODEL_CALLS_PER_RUN):
+        if service.calls >= MAX_MODEL_CALLS_PER_SESSION:
             text = "Session API call limit reached. Inspect actions already prepared."
+            service.audit({"limit": "session_model_calls"}, "blocked", text)
             break
         service.calls += 1
         payload = {
@@ -160,47 +226,79 @@ def run_onboarding(service, mail, mode, mail_id):
             "tools": schemas,
             "max_tokens": 1000,
         }
+        if config["temperature"] is not None:
+            payload["temperature"] = config["temperature"]
+        headers = {"Content-Type": "application/json"}
+        if config["key"]:
+            headers["Authorization"] = "Bearer " + config["key"]
         request = urllib.request.Request(
-            url,
-            data=json.dumps(payload).encode(),
-            headers={
-                "Authorization": "Bearer " + key,
-                "Content-Type": "application/json",
-            },
+            config["url"], data=json.dumps(payload).encode(), headers=headers
         )
-        with urllib.request.urlopen(request, timeout=45) as response:
-            message = json.load(response)["choices"][0]["message"]
+        try:
+            with urllib.request.urlopen(request, timeout=config["timeout"]) as response:
+                body = json.load(response)
+        except Exception:
+            service.record_model_call(model, "error")
+            raise
+        service.record_model_call(model, "ok", body.get("usage"))
+        message = body["choices"][0]["message"]
         calls = message.get("tool_calls") or []
         if not calls:
             text = message.get("content") or "Planning finished."
+            # Small models often say they will act without calling a tool. Remind them
+            # of required steps not yet attempted; the policy still decides each call.
+            missing = [t for t in REQUIRED_TOOLS if t not in {a["tool"] for a in actions}]
+            if missing and reminders < MAX_REMINDERS:
+                reminders += 1
+                service.audit({"reminder": missing}, "info", "Model stopped before required steps")
+                messages.append({"role": "assistant", "content": text})
+                messages.append({
+                    "role": "user",
+                    "content": "You have not called these tools yet: " + ", ".join(missing)
+                    + ". Call them now with tool calls, or say exactly which detail is missing.",
+                })
+                continue
             break
         if len(calls) > 5 or len(actions) + len(calls) > 12:
             text = "Tool request limit reached. Inspect actions already prepared."
+            service.audit(
+                {"limit": "tool_requests", "requested": len(calls)}, "blocked", text
+            )
             break
+        # Small local models sometimes omit call IDs; the tool reply must still match one.
+        calls = [c if isinstance(c, dict) else {"raw": c} for c in calls]
+        for index, call in enumerate(calls):
+            if not call.get("id"):
+                call["id"] = f"call_{service.calls}_{index}"
         messages.append(
             {
                 "role": "assistant",
-                "content": message.get("content"),
+                "content": message.get("content") or "",
                 "tool_calls": calls,
             }
         )
         for call in calls:
             try:
-                action = {
-                    "tool": call["function"]["name"],
-                    "args": json.loads(call["function"]["arguments"]),
-                }
+                arguments = call["function"]["arguments"]
+                # OpenAI-style servers send a JSON string; some local servers send an object.
+                if isinstance(arguments, str):
+                    arguments = json.loads(arguments)
+                action = {"tool": call["function"]["name"], "args": arguments}
                 signature = json.dumps(action, sort_keys=True)
                 if signature in seen:
                     result = {
                         "status": "blocked",
                         "reason": "Duplicate request in this run",
                     }
+                    service.audit(action, "blocked", result["reason"])
                 else:
                     seen.add(signature)
                     result = invoke(action)
             except (ValueError, KeyError, TypeError):
                 result = {"status": "blocked", "reason": "Malformed tool request"}
+                service.audit(
+                    {"malformed_call": str(call)[:500]}, "blocked", result["reason"]
+                )
             messages.append(
                 {
                     "role": "tool",
@@ -209,7 +307,8 @@ def run_onboarding(service, mail, mode, mail_id):
                 }
             )
     return {
-        "mode": "live API",
+        "mode": "local LLM" if config["local"] else "live API",
+        "run_id": run_id,
         "model": model,
         "actions": actions,
         "results": results,

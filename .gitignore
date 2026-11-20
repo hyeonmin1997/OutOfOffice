@@ -31,3 +31,6 @@ __pycache__/
 .venv/
 data/*
 !data/seed/
+
+# Evaluation output: fixture smoke runs are not evidence; keep only real API runs in Git
+results/fixture_*

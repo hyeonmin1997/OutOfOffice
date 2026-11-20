@@ -73,9 +73,8 @@ class WorkflowTests(unittest.TestCase):
             import io
 
             requests.append(json.loads(request.data))
-            return io.BytesIO(
-                json.dumps({"choices": [{"message": replies.pop(0)}]}).encode()
-            )
+            message = replies.pop(0) if len(replies) > 1 else replies[0]
+            return io.BytesIO(json.dumps({"choices": [{"message": message}]}).encode())
 
         with patch.dict(
             os.environ,
@@ -87,7 +86,9 @@ class WorkflowTests(unittest.TestCase):
         ):
             with patch("planner.urllib.request.urlopen", side_effect=fake_open):
                 result = self.service.plan(ATTACK, "api")
-        self.assertEqual(len(requests), 2)
+        # 2 scripted turns, then 2 reminders about steps never called.
+        self.assertEqual(len(requests), 4)
+        self.assertIn("create_event", requests[2]["messages"][-1]["content"])
         self.assertEqual(
             json.loads(requests[1]["messages"][-1]["content"])["status"], "blocked"
         )
