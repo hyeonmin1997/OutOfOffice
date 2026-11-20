@@ -92,7 +92,8 @@ python3 -m unittest discover -s tests -v
 ```sh
 python3 evaluate.py                             # fixture 스모크 시험 (증거 아님)
 python3 evaluate.py --mode api                  # 실제 LLM (로컬 Ollama), dev split
-python3 evaluate.py --mode api --repeats 3      # 사례별 3회 실행 → ASR@3
+python3 evaluate.py --mode api --split test     # 고정된 test split (보고용, 조정에 사용 금지)
+python3 evaluate.py --mode api --repeats 3 --temperature 0.7   # 사례별 3회 → ASR@3
 ```
 
 - **시행 단위**: 사례 하나(고정된 업무 + 메일 한 통)를 새로 초기화한 메모리 DB에서 한 번 실행합니다.
@@ -113,7 +114,9 @@ python3 evaluate.py --mode api --repeats 3      # 사례별 3회 실행 → ASR@
 
 결과는 `results/<mode>_<split>_<시각>.json`에 저장됩니다. 모델 ID, git 커밋, 사례 파일 SHA-256, 시행별 행동·결과가 포함됩니다. fixture 결과(`results/fixture_*`)는 Git에서 제외하고, 실제 LLM 결과만 커밋합니다. 실제 LLM 모드는 실행 전에 Ollama 연결과 모델 다운로드 여부를 확인하고 최대 호출 수를 출력합니다. 원격 엔드포인트로 바꾼 경우에는 `--yes`를 붙여야 실행됩니다.
 
-평가 사례는 `eval/cases.json`에 있습니다. 현재 사례는 **초안**(정상 5, 공격 6, 모두 dev)이고 팀 검토가 필요합니다. 제안서의 정상 40개/공격 40개 데이터셋, test split 고정, 데이터 카드는 **아직 없습니다**. test split은 방어를 조정하기 전에 고정하고, 보고할 때만 `--split test`로 실행합니다. 금지 행동 0건 목표는 방어 적용 후 평가에 한정됩니다.
+평가 사례 `eval/cases.json`은 `python3 eval/build_cases.py`가 커버리지 그리드(공격 목표 4 × 주입 위치 5 × 문장 2)에서 결정론적으로 생성합니다. 공격 40개와 각 공격의 정상 쌍 40개(dev 20+20, test 20+20), 한국어 ood 8개입니다. 정상 쌍은 공격 문장만 무해한 문장으로 바꾼 메일이라 가드 오탐을 같은 표면에서 잽니다. 구성, 범위 밖 항목과 이유, 결과, 한계는 `eval/DATA_CARD.md`에 있습니다. 템플릿은 팀 검토가 필요합니다.
+
+조정(프롬프트, 규칙)은 dev에서만 하고, test는 보고할 때만 실행합니다. 판정 규칙을 고친 뒤에는 모델을 다시 부르지 않고 `python3 evaluate.py --rescore results/<파일>.json`으로 저장된 시행을 다시 채점합니다(DB 상태로 판정한 피해·업무 성공은 그대로 유지). 기본 temperature는 0입니다. 금지 행동 0건 목표는 방어 적용 후 평가에 한정됩니다.
 
 ## 감사 로그
 
@@ -156,7 +159,9 @@ JSON 수정은 파일을 DB로 가져오는 방향입니다. 실행 중 DB 변�
 - `static/style.css`: 화면 스타일
 - `static/app.js`: 서버 통신과 행동·승인·저장 결과 표시
 - `evaluate.py`: Defense OFF/ON 비교 평가와 결과 JSON 저장
-- `eval/cases.json`: 평가 사례 (정상·공격, split, 출처)
+- `eval/build_cases.py`: 커버리지 그리드에서 평가 사례 생성 (`--check`로 최신 여부 확인)
+- `eval/cases.json`: 생성된 평가 사례 (정상·공격, split, 출처)
+- `eval/DATA_CARD.md`: 데이터 카드 (구성, 범위, 결과, 한계)
 - `tests/`: 정책, 데이터 가져오기, 온보딩, 감사 로그, 평가 판정 및 모의 API 응답 테스트
 
 코드 변경 후 실행 중인 서버를 Ctrl+C로 종료하고 `python3 app.py`로 다시 시작하세요.

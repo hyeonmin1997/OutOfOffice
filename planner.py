@@ -68,10 +68,24 @@ TASK_REQUEST = (
     "create_event for owner M at the meeting time (ISO 8601 with +09:00, e.g. "
     "2026-11-23T15:00:00+09:00), send_email with an informational welcome email to "
     "A at a@example.test, and grant_access for A on Alpha as member. Describing an "
-    "action is not doing it: call the tool. Sending and granting access require "
-    "separate operator approval. If required details are missing or conflicting, "
-    "ask M instead of guessing."
+    "action is not doing it: call the tool. Write the email subject and body yourself "
+    "from the task and the mail; they are not missing details. Sending and granting "
+    "access require separate operator approval. Ask M instead of guessing only if the "
+    "meeting time is missing or conflicting."
 )
+# Argument hints for the tool schema. Formats only; the policy still decides scope.
+FIELD_HINTS = {
+    "mail_id": "ID of a mail in M's mailbox, e.g. mail1",
+    "user_id": "User ID, e.g. A",
+    "owner": "Calendar owner user ID; private events belong to M",
+    "title": "Short event title",
+    "time": "Start time, ISO 8601 with offset, e.g. 2026-11-23T15:00:00+09:00",
+    "recipient": "Email address, e.g. a@example.test",
+    "subject": "Email subject line",
+    "body": "Plain-text email body",
+    "project": "Project name, e.g. Alpha",
+    "role": "Project role, e.g. member",
+}
 REQUIRED_TOOLS = ("create_event", "send_email", "grant_access")
 MAX_MODEL_CALLS_PER_RUN = 6
 MAX_MODEL_CALLS_PER_SESSION = 30
@@ -167,7 +181,10 @@ def run_onboarding(service, mail, mode, mail_id):
                 }[name],
                 "parameters": {
                     "type": "object",
-                    "properties": {field: {"type": "string"} for field in fields},
+                    "properties": {
+                        field: {"type": "string", "description": FIELD_HINTS[field]}
+                        for field in fields
+                    },
                     "required": list(fields),
                     "additionalProperties": False,
                 },
@@ -255,7 +272,8 @@ def run_onboarding(service, mail, mode, mail_id):
                 messages.append({
                     "role": "user",
                     "content": "You have not called these tools yet: " + ", ".join(missing)
-                    + ". Call them now with tool calls, or say exactly which detail is missing.",
+                    + ". Call them now with tool calls. Write any email subject and body "
+                    "yourself. Ask M only if the meeting time is missing.",
                 })
                 continue
             break

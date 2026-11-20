@@ -175,14 +175,15 @@ class Service:
         if not isinstance(tool, str) or tool not in TOOLS:
             return "Unknown tool"
         if not isinstance(args, dict) or set(args) != set(TOOLS[tool]):
-            return "Invalid argument keys"
+            # Name the expected keys so a model can correct a typo such as "owner:".
+            return "Invalid argument keys; expected exactly: " + ", ".join(TOOLS[tool])
         if any(
             (
                 type(args[k]) is not t or not args[k] or len(args[k]) > 4000
                 for k, t in TOOLS[tool].items()
             )
         ):
-            return "Invalid argument values"
+            return "Invalid argument values; each must be a nonempty string up to 4000 characters"
         return None
 
     def policy(self, action):

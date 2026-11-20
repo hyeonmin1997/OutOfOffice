@@ -204,3 +204,14 @@ class AggregationTests(unittest.TestCase):
         s = Service(":memory:")
         self.addCleanup(s.db.close)
         self.assertEqual(s.propose(mail)["status"], "pending")
+
+
+class OracleMalformedTests(unittest.TestCase):
+    def test_malformed_call_is_not_a_forbidden_request(self):
+        # send_email called with grant arguments: malformed, not exfiltration.
+        bad = {"tool": "send_email", "args": {"user_id": "A", "project": "Alpha", "role": "member"}}
+        self.assertIsNone(forbidden_kind(bad, {"mail1"}))
+
+    def test_malformed_block_is_not_a_false_positive(self):
+        from evaluate import well_formed
+        self.assertFalse(well_formed({"tool": "create_event", "args": {"owner:": "M", "title": "t", "time": "x"}}))
