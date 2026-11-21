@@ -21,6 +21,7 @@ import argparse
 import datetime
 import hashlib
 import json
+import math
 import os
 import subprocess
 import sys
@@ -28,7 +29,7 @@ import time
 from collections import Counter
 from pathlib import Path
 from planner import llm_config, local_model_info
-from service import Service
+from service import APPROVAL_EXPIRED, Service
 
 ROOT = Path(__file__).resolve().parent
 DEFAULT_CASES = ROOT / "eval" / "cases.json"
@@ -147,7 +148,7 @@ def run_trial(service_cls, case, mode):
         decisions = [svc.approve(token, True, actor="operator_sim") for token in prompts]
         # The approval window opens when the run ends, so this should stay 0; a
         # nonzero count means benign failures came from timing, not from the model.
-        expired = sum(d.get("reason") == "Expired or consumed approval" for d in decisions)
+        expired = sum(d.get("reason") == APPROVAL_EXPIRED for d in decisions)
         after = svc.state()
         harms = state_harms(before, after)
         harms += [
@@ -208,8 +209,24 @@ def run_setting(name, service_cls, cases, mode, repeats):
     return trials
 
 
+def wilson(num, den, z=1.96):
+    """95% Wilson score interval in percent, or None for an empty denominator.
+
+    With 20 attacks per split, or a handful of effective ones, a rate alone hides how
+    little it pins down: 0/2 is compatible with anything up to about 66%.
+    """
+    if not den:
+        return None
+    p = num / den
+    scale = 1 + z * z / den
+    centre = (p + z * z / (2 * den)) / scale
+    half = z * math.sqrt(p * (1 - p) / den + z * z / (4 * den * den)) / scale
+    return [round(max(0.0, centre - half) * 100, 1), round(min(1.0, centre + half) * 100, 1)]
+
+
 def rate(num, den):
-    return {"num": num, "den": den, "pct": round(num / den * 100, 1) if den else None}
+    return {"num": num, "den": den, "pct": round(num / den * 100, 1) if den else None,
+            "ci95": wilson(num, den)}
 
 
 def summarize(trials, effective=None):
@@ -250,8 +267,10 @@ def summarize(trials, effective=None):
             if benign else None
         ),
         "audit_complete": rate(sum(t["audit_complete"] for t in ok), len(ok)),
-        "approvals_expired": sum(t.get("approvals_expired", 0) for t in ok),
-        "max_trial_seconds": max((t.get("seconds", 0) for t in ok), default=None),
+        # None, not 0, when the trials predate these fields (older result files).
+        "approvals_expired": (sum(t["approvals_expired"] for t in ok if "approvals_expired" in t)
+                              if any("approvals_expired" in t for t in ok) else None),
+        "max_trial_seconds": max((t["seconds"] for t in ok if "seconds" in t), default=None),
         "model_calls": sum(t["model_calls"] for t in ok),
         "tokens": sum(t["tokens"] for t in ok),
     }
@@ -279,10 +298,12 @@ def git_info():
     }
 
 
-def fmt(r):
+def fmt(r, ci=True):
     if r is None or r["den"] == 0:
         return "N/A"
-    return f"{r['pct']:.1f}% ({r['num']}/{r['den']})"
+    text = f"{r['pct']:.1f}% ({r['num']}/{r['den']})"
+    interval = r.get("ci95") if ci else None
+    return text + (f" [{interval[0]:g}–{interval[1]:g}]" if interval else "")
 
 
 def rescore(path):
@@ -336,6 +357,8 @@ def main():
     parser.add_argument("--temperature", default="0",
                         help="sampling temperature for the real LLM (default 0; '' = model default)")
     parser.add_argument("--repeats", type=int, default=1, help="runs per case (ASR@k)")
+    parser.add_argument("--kind", choices=["all", "attack", "benign"], default="all",
+                        help="run only this kind of case, e.g. attack for an ASR@k run")
     parser.add_argument("--out", type=Path, default=ROOT / "results")
     parser.add_argument("--yes", action="store_true", help="confirm calls to a remote endpoint")
     args = parser.parse_args()
@@ -350,12 +373,14 @@ def main():
     cases = json.loads(raw)
     if args.split != "all":
         cases = [c for c in cases if c["split"] == args.split]
+    if args.kind != "all":
+        cases = [c for c in cases if c["kind"] == args.kind]
     skipped = []
     if args.mode == "fixture":
         skipped = [c["id"] for c in cases if not c.get("fixture")]
         cases = [c for c in cases if c.get("fixture")]
     if not cases:
-        sys.exit(f"No cases for split={args.split} mode={args.mode}")
+        sys.exit(f"No cases for split={args.split} kind={args.kind} mode={args.mode}")
     if args.mode == "api" and args.split == "test" and git_info()["dirty"]:
         print("WARNING: uncommitted code changes. Commit before a test-split run so the "
               "result names the exact code; the diff hash is recorded meanwhile.")
@@ -363,6 +388,9 @@ def main():
     config, model_info = None, None
     if args.mode == "api":
         os.environ["LLM_TEMPERATURE"] = args.temperature
+        if args.repeats > 1 and args.temperature.strip() in ("0", "0.0"):
+            print("WARNING: --repeats > 1 at temperature 0 repeats the same answer, so ASR@k "
+                  "equals ASR. Use e.g. --temperature 0.7 for an ASR@k run.")
         try:
             config = llm_config()
         except ValueError as error:
@@ -401,13 +429,15 @@ def main():
     s_off, s_on = summarize(off), summarize(on, effective)
 
     label = "SMOKE TEST (fixture)" if args.mode == "fixture" else f"live LLM: {config['model']}"
-    print(f"=== OutOfOffice evaluation — {label} — split={args.split}, repeats={args.repeats} ===")
-    print(f"{'Setting':<12} | {'Benign task success':<20} | {'Attack success (ASR)':<20} | "
-          f"{'Unsafe requests':<16} | {'Prompts/task'}")
-    print("-" * 92)
+    print(f"=== OutOfOffice evaluation — {label} — split={args.split}, kind={args.kind}, "
+          f"repeats={args.repeats} ===")
+    print(f"{'Setting':<12} | {'Benign task success':<30} | {'Attack success (ASR)':<30} | "
+          f"{'Unsafe requests':<30} | {'Prompts/task'}")
+    print("-" * 126)
     for name, s in (("Defense OFF", s_off), ("Defense ON", s_on)):
-        print(f"{name:<12} | {fmt(s['benign_task_success']):<20} | {fmt(s['attack_success']):<20} | "
-              f"{fmt(s['unsafe_request']):<16} | {s['approval_prompts_per_benign_task']}")
+        print(f"{name:<12} | {fmt(s['benign_task_success']):<30} | {fmt(s['attack_success']):<30} | "
+              f"{fmt(s['unsafe_request']):<30} | {s['approval_prompts_per_benign_task']}")
+    print("[lo–hi] = 95% Wilson interval, in %.")
     print()
     print(f"Effective attacks (succeed with Defense OFF): {len(effective)}/{len(attack_ids)}"
           + (f" — dead, reported separately: {', '.join(dead)}" if dead else ""))
@@ -445,7 +475,8 @@ def main():
 
     args.out.mkdir(parents=True, exist_ok=True)
     stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-    path = args.out / f"{args.mode}_{args.split}_{stamp}.json"
+    kind = "" if args.kind == "all" else f"-{args.kind}"
+    path = args.out / f"{args.mode}_{args.split}{kind}_{stamp}.json"
     record = {
         "meta": {
             "mode": args.mode,
@@ -460,6 +491,7 @@ def main():
             "cases_sha256": hashlib.sha256(raw).hexdigest(),
             "split": args.split,
             "repeats": args.repeats,
+            "kind": args.kind,
             "skipped_cases": skipped,
             "operator_model": "approve every pending request (worst case)",
             "oracle_version": ORACLE_VERSION,
