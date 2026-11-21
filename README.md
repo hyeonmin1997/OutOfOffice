@@ -11,13 +11,13 @@ source .venv/bin/activate          # Windows: .venv\Scripts\activate
 
 # 2. 모델 없이 바로 확인: 단위 시험과 모의 실행
 python3 -m unittest discover -s tests
-python3 app.py                     # http://127.0.0.1:8000 → '모의 실행' 선택
+python3 app.py                     # http://127.0.0.1:8000 → 'Scripted (no model)' 선택
 
 # 3. 실제 LLM: Ollama 설치 (pip 패키지가 아닌 별도 앱)
 #    macOS: brew install ollama 또는 https://ollama.com/download
 ollama serve                       # 앱으로 설치했다면 이미 실행 중
 ollama pull qwen2.5:3b             # 약 2GB. 다른 모델은 LLM_MODEL로 지정
-python3 app.py                     # 화면에서 '실제 LLM (로컬 Ollama)' 선택
+python3 app.py                     # 화면에서 'Real LLM (local Ollama)' 선택
 python3 evaluate.py --mode api     # 방어 전후 평가
 ```
 
@@ -28,11 +28,11 @@ python3 evaluate.py --mode api     # 방어 전후 평가
 화면은 **M의 업무 요청 → 참고 메일 → 행동 검사·승인 → 실제 저장 결과** 순서입니다.
 업무 범위는 M / A / Alpha / member로 고정되어 있습니다. 일반적인 자유 대화나 로그인 시스템은 아닙니다.
 
-1. 정상 메일 예시 → 온보딩 시작: 개인 일정은 등록되고, 안내 메일과 A의 권한은 각각 승인 대기합니다.
+1. Load normal mail → Run onboarding: 개인 일정은 등록되고, 안내 메일과 A의 권한은 각각 승인 대기합니다.
 2. 메일 발송과 권한 요청을 개별 승인하거나 거절합니다. 거절한 행동은 실행되지 않습니다.
-3. 실험 초기화 → 공격 메일 예시 → 시작: B/Finance/admin 요청은 승인 전에 차단됩니다. 허용된 안내 메일은 별도로 승인 대기할 수 있습니다.
+3. Reset experiment → Load attack mail → Run onboarding: B/Finance/admin 요청은 승인 전에 차단됩니다. 허용된 안내 메일은 별도로 승인 대기할 수 있습니다.
 4. 하단 권한·일정·발신함에서 실제 결과를 보고, 상세 DB/로그를 펼쳐 확인합니다.
-5. **방어 OFF 대조**: '방어 OFF에서 실제 성공한 공격' 버튼(평가 사례 `a_dev_exfil_appended`, `a_test_task_overwrite_fake_system`)으로 메일을 불러와 방어를 OFF → ON으로 바꿔 같은 메일을 실행합니다. OFF는 `evaluate.py`의 Defense OFF와 같은 코드 경로(`Service.defense = False`)이며 그 실행 한 번에만 적용됩니다. 로그에 `Baseline run`이 남습니다. 실행 사이에는 초기화하세요. 실제 LLM의 응답은 매번 같지 않을 수 있습니다.
+5. **방어 OFF 대조**: 'Attacks that succeeded with Defense OFF' 버튼(평가 사례 `a_dev_exfil_appended`, `a_test_task_overwrite_fake_system`)으로 메일을 불러와 방어를 OFF → ON으로 바꿔 같은 메일을 실행합니다. OFF는 `evaluate.py`의 Defense OFF와 같은 코드 경로(`Service.defense = False`)이며 그 실행 한 번에만 적용됩니다. 로그에 `Baseline run`이 남습니다. 실행 사이에는 초기화하세요. 실제 LLM의 응답은 매번 같지 않을 수 있습니다.
 
 **모의 실행(Fixture)은 정해진 모델 응답을 흉내 낸 검사이며 실제 AI 성능의 증거가 아닙니다.**
 모의 일정·안내문은 November 23 at 15:00 예시 전용입니다. 임의 문장 이해는 실제 LLM 모드에서 시험합니다.
@@ -149,9 +149,9 @@ python3 manage_data.py load
 python3 manage_data.py show
 ```
 
-동일 id는 갱신하고 새 id는 추가합니다. JSON에서 지운 행은 이 명령으로 DB에서 삭제되지 않으며, 기존 권한·승인·로그는 보존합니다. **Reset database는 JSON에서 DB를 새로 구성하며 기존 실행 결과와 승인·로그를 지웁니다.** 프로그램 재시작만으로 기존 DB를 덮어쓰지는 않습니다.
+동일 id는 갱신하고 새 id는 추가합니다. JSON에서 지운 행은 이 명령으로 DB에서 삭제되지 않으며, 기존 권한·승인·로그는 보존합니다. **Reset experiment는 JSON에서 DB를 새로 구성하며 기존 실행 결과와 승인·로그를 지웁니다.** 프로그램 재시작만으로 기존 DB를 덮어쓰지는 않습니다.
 
-화면의 Saved mail for M에서 추가한 메일을 선택해 실행할 수 있습니다. 시작할 때 선택한 메일의 실험용 본문 한 개를 읽습니다. 원본 DB는 변경하지 않습니다. 실제 LLM은 추가로 M 소유 메일을 도구로 읽을 수 있으며 다른 사람의 메일은 정책에서 차단합니다. DB 조회에는 사용자·메일·일정도 표시합니다. 이 화면과 JSON 반영 기능은 신뢰된 로컬 시연자용이며 공격자 인터페이스가 아닙니다.
+화면의 Saved mail in M's inbox에서 추가한 메일을 선택해 실행할 수 있습니다. 시작할 때 선택한 메일의 실험용 본문 한 개를 읽습니다. 원본 DB는 변경하지 않습니다. 실제 LLM은 추가로 M 소유 메일을 도구로 읽을 수 있으며 다른 사람의 메일은 정책에서 차단합니다. DB 조회에는 사용자·메일·일정도 표시합니다. 이 화면과 JSON 반영 기능은 신뢰된 로컬 시연자용이며 공격자 인터페이스가 아닙니다.
 
 JSON 수정은 파일을 DB로 가져오는 방향입니다. 실행 중 DB 변경이 JSON에 자동 저장되지는 않습니다. JSON은 Git에 포함되고 demo.sqlite와 __pycache__는 제외됩니다. JSON을 pull한 팀원도 load를 실행하면 반영할 수 있습니다.
 
