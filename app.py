@@ -6,6 +6,7 @@ import urllib.error
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
+from planner import LLMResponseError
 from service import ATTACK, NORMAL, Service
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -14,6 +15,10 @@ ASSETS = {
     "/style.css": ("style.css", "text/css; charset=utf-8"),
     "/app.js": ("app.js", "text/javascript; charset=utf-8"),
 }
+PORT = 8000
+# Requests must name this server; another Host means DNS rebinding or a proxy.
+ALLOWED_HOSTS = (f"127.0.0.1:{PORT}", f"localhost:{PORT}")
+ALLOWED_ORIGINS = (None, *(f"http://{host}" for host in ALLOWED_HOSTS))
 
 
 def make_handler(service):
@@ -27,7 +32,15 @@ def make_handler(service):
             self.end_headers()
             self.wfile.write(payload)
 
+        def host_denied(self):
+            if self.headers.get("Host") in ALLOWED_HOSTS:
+                return False
+            self.reply({"error": "Host denied"}, 403)
+            return True
+
         def do_GET(self):
+            if self.host_denied():
+                return
             if self.path in ASSETS:
                 filename, content_type = ASSETS[self.path]
                 self.send_response(200)
@@ -43,8 +56,9 @@ def make_handler(service):
 
         def do_POST(self):
             # Only a trusted local demonstrator may operate this server.
-            allowed_origins = (None, "http://127.0.0.1:8000", "http://localhost:8000")
-            if self.headers.get("Origin") not in allowed_origins:
+            if self.host_denied():
+                return
+            if self.headers.get("Origin") not in ALLOWED_ORIGINS:
                 return self.reply({"error": "Origin denied"}, 403)
             try:
                 length = int(self.headers.get("Content-Length", "0"))
@@ -58,6 +72,8 @@ def make_handler(service):
                 elif self.path == "/approve":
                     if type(value.get("accept")) is not bool:
                         raise ValueError("Boolean approval required")
+                    if type(value.get("id")) is not str:
+                        raise ValueError("Approval id must be a string")
                     result = service.approve(value["id"], value["accept"])
                 elif self.path == "/import":
                     result = service.import_seed()
@@ -77,6 +93,14 @@ def make_handler(service):
                     },
                     503,
                 )
+            except LLMResponseError:
+                self.reply(
+                    {
+                        "error": "LLM 서버의 응답 형식이 올바르지 않습니다. 모델 이름과 "
+                        "엔드포인트(chat completions, tool calling 지원)를 확인하세요."
+                    },
+                    502,
+                )
             except Exception:
                 # Do not expose provider responses or credentials through HTTP errors.
                 self.reply(
@@ -91,8 +115,8 @@ def make_handler(service):
 
 def main():
     service = Service(os.getenv("DB_PATH", str(STATIC_DIR.parent / "data/demo.sqlite")))
-    server = HTTPServer(("127.0.0.1", 8000), make_handler(service))
-    print("Open http://127.0.0.1:8000 — trusted local demo only")
+    server = HTTPServer(("127.0.0.1", PORT), make_handler(service))
+    print(f"Open http://127.0.0.1:{PORT} — trusted local demo only")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

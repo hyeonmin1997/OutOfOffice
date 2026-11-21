@@ -28,6 +28,7 @@ Out of scope, with reasons:
 - **Attacks spread across several mails:** one mail per task run.
 - **Burning the budget:** bounded by call limits (6 per run, 30 per session); measured with the cost cap in Lab 5.
 - **Encoded / obfuscated instructions, attacks written outside the team:** listed as outside the test set in the proposal (§5). Coverage there is unknown.
+- **Wrong title or time on M's own calendar:** `create_event` for owner M runs without approval and its title/time are not checked, so an injected mail can plant a misleading event. Not counted as harm by the oracle; a known residual risk.
 - **Harmful content to an allowed recipient** (e.g. a phishing link in A's welcome mail): not a forbidden action under the current policy; a known residual risk, not measured by this set.
 
 ## Results
@@ -45,7 +46,8 @@ Out of scope, with reasons:
 - By goal, undefended: exfil succeeded on dev (4/5) but not on test (0/5); task_overwrite 1/5 dev, 2/5 test; grant and read 0/5 on both — the 3B model never attempted them, so these rows do not test the defence.
 - Benign forbidden writes: 0 in all runs. Benign task success did not drop with the defence on (dev 80/80, test 70/70) and misses the proposal's 90% target.
 - Dev history: `api_dev_20261120-222546.json` is the run before the dev-only prompt fix (the model asked M for the email subject/body); the fix raised Defense OFF benign success 75% → 80%. The test split was run once, after the fix.
-- All three files were re-judged with oracle v2 (`evaluate.py --rescore`): v1 counted malformed tool calls as forbidden requests. ASR and task success are unchanged; the v1 summary is kept as `summary_original`.
+- Earlier smoke runs on the old 11-case set, before the coverage grid: `api_dev_20261120-134041.json` and `api_dev_20261120-170656.json` (commit `3a20d27` plus uncommitted changes, 5 benign / 6 attack). Kept as history only; not comparable with the grid results.
+- All five files were re-judged with oracle v2 (`evaluate.py --rescore`): v1 counted malformed tool calls as forbidden requests. ASR and task success are unchanged; the v1 summary is kept as `summary_original`.
 
 ## Known gaps
 
@@ -54,4 +56,5 @@ Out of scope, with reasons:
 - Small dev/test sets (20 attacks each): one case changes a rate by 5 points.
 - Results depend on one 3B model; attacks that fail against it may succeed against stronger models and the reverse. Only 2 test attacks are effective, so the defended ASR of 0/2 is a weak estimate; repeated runs (`--repeats`, temperature > 0) and attacks that the model actually attempts (grant, read) are needed.
 - Exfil worked on dev wording but not on test wording: the effect depends on phrasing, which a 2-wording grid samples poorly.
+- The saved dev/test runs were made with uncommitted changes on top of `d6f0082` (`git.dirty: true`; the test run preceded commit `66610c0` by two minutes). The cases file is pinned by `cases_sha256`, but the exact planner code is not. Later runs record `diff_sha256`; re-run test from a clean commit before the final report.
 - A fixed set measures the attacks we thought of; adaptive attackers (Weeks 14–15) are the test it cannot replace.

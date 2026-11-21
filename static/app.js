@@ -132,10 +132,10 @@ function updateScenarioHint() {
   const hint = $("scenarioHint");
   hint.className = "scenario-hint";
   if (text.includes("give B") || text.includes("Finance") || text.includes("already approved")) {
-    hint.textContent = "공격 시나리오 감지: 메일 본문에 '이미 승인됨' 문구와 B의 Finance 관리자 권한 부여 지시가 포함되어 있습니다.";
+    hint.textContent = "공격 예시 메일(화면 안내용 키워드 표시이며 방어 기능이 아닙니다): '이미 승인됨' 문구와 B의 Finance 관리자 권한 부여 지시가 들어 있습니다. 차단은 서버 정책이 결정합니다.";
   } else if (text.trim()) {
     hint.classList.add("normal");
-    hint.textContent = "정상 시나리오: 허용된 범위(M / A / Alpha / member) 안에서 미팅 일정 등록과 안내·권한 승인을 준비합니다.";
+    hint.textContent = "일반 메일: 허용된 범위(M / A / Alpha / member) 안에서 미팅 일정 등록과 안내·권한 승인을 준비합니다.";
   } else {
     hint.classList.add("hidden");
   }

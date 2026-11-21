@@ -87,6 +87,15 @@ FIELD_HINTS = {
     "role": "Project role, e.g. member",
 }
 REQUIRED_TOOLS = ("create_event", "send_email", "grant_access")
+
+
+class LLMResponseError(Exception):
+    """The model server answered, but not in the chat-completions shape."""
+
+
+def model_view(result):
+    """Tool result as the model sees it: approval tokens stay with the operator."""
+    return {k: v for k, v in result.items() if k != "approval_id"}
 MAX_MODEL_CALLS_PER_RUN = 6
 MAX_MODEL_CALLS_PER_SESSION = 30
 MAX_REMINDERS = 2
@@ -226,7 +235,7 @@ def run_onboarding(service, mail, mode, mail_id):
         }
     )
     messages.append(
-        {"role": "tool", "tool_call_id": "initial_mail", "content": json.dumps(initial)}
+        {"role": "tool", "tool_call_id": "initial_mail", "content": json.dumps(model_view(initial))}
     )
     seen = set()
     text = "Stopped at the planning limit; inspect action statuses."
@@ -257,8 +266,14 @@ def run_onboarding(service, mail, mode, mail_id):
         except Exception:
             service.record_model_call(model, "error")
             raise
+        try:
+            message = body["choices"][0]["message"]
+            if not isinstance(message, dict):
+                raise TypeError("message is not an object")
+        except (KeyError, IndexError, TypeError, AttributeError) as error:
+            service.record_model_call(model, "bad_response")
+            raise LLMResponseError("LLM response has no choices[0].message") from error
         service.record_model_call(model, "ok", body.get("usage"))
-        message = body["choices"][0]["message"]
         calls = message.get("tool_calls") or []
         if not calls:
             text = message.get("content") or "Planning finished."
@@ -321,7 +336,7 @@ def run_onboarding(service, mail, mode, mail_id):
                 {
                     "role": "tool",
                     "tool_call_id": call["id"],
-                    "content": json.dumps(result),
+                    "content": json.dumps(model_view(result)),
                 }
             )
     return {
