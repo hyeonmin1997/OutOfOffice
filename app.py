@@ -10,6 +10,9 @@ from planner import LLMResponseError
 from service import ATTACK, NORMAL, Service
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
+CASES_FILE = STATIC_DIR.parent / "eval" / "cases.json"
+# Attacks that succeeded with Defense OFF against qwen2.5:3b (see eval/DATA_CARD.md).
+BASELINE_EXAMPLES = ("a_dev_exfil_appended", "a_test_task_overwrite_fake_system")
 ASSETS = {
     "/": ("index.html", "text/html; charset=utf-8"),
     "/style.css": ("style.css", "text/css; charset=utf-8"),
@@ -21,6 +24,19 @@ ALLOWED_HOSTS = (f"127.0.0.1:{PORT}", f"localhost:{PORT}")
 ALLOWED_ORIGINS = (None, *(f"http://{host}" for host in ALLOWED_HOSTS))
 
 
+def baseline_examples():
+    """Measured attack cases for the Defense OFF comparison, read from the case file."""
+    try:
+        cases = {c["id"]: c for c in json.loads(CASES_FILE.read_text(encoding="utf-8"))}
+    except (OSError, ValueError):
+        return []
+    return [
+        {"id": cid, "goal": cases[cid]["goal"], "split": cases[cid]["split"],
+         "mail": cases[cid]["mail"]}
+        for cid in BASELINE_EXAMPLES if cid in cases
+    ]
+
+
 def make_handler(service):
     """Bind one local demo service to the HTTP routes."""
 
@@ -29,6 +45,7 @@ def make_handler(service):
             payload = json.dumps(value, ensure_ascii=False).encode("utf-8")
             self.send_response(status)
             self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(payload)))
             self.end_headers()
             self.wfile.write(payload)
 
@@ -50,24 +67,32 @@ def make_handler(service):
             elif self.path == "/state":
                 self.reply(service.state())
             elif self.path == "/examples":
-                self.reply({"normal": NORMAL, "attack": ATTACK})
+                self.reply({"normal": NORMAL, "attack": ATTACK,
+                            "baseline": baseline_examples()})
             else:
                 self.reply({"error": "Not found"}, 404)
 
         def do_POST(self):
+            # Read the (bounded) body first: replying with it unread can reset the
+            # connection before the client sees the response.
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+            except ValueError:
+                length = -1
+            body = self.rfile.read(length) if 0 < length <= 16000 else b""
             # Only a trusted local demonstrator may operate this server.
             if self.host_denied():
                 return
             if self.headers.get("Origin") not in ALLOWED_ORIGINS:
                 return self.reply({"error": "Origin denied"}, 403)
             try:
-                length = int(self.headers.get("Content-Length", "0"))
                 if not 0 < length <= 16000:
                     raise ValueError("Invalid request size")
-                value = json.loads(self.rfile.read(length))
+                value = json.loads(body)
                 if self.path == "/plan":
                     result = service.plan(
-                        value["mail"], value["mode"], value["mail_id"]
+                        value["mail"], value["mode"], value["mail_id"],
+                        value.get("defense", True),
                     )
                 elif self.path == "/approve":
                     if type(value.get("accept")) is not bool:

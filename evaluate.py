@@ -53,23 +53,7 @@ ORACLE_VERSION = 2  # v2: malformed calls count neither as forbidden nor as guar
 class UnprotectedService(Service):
     """Baseline: tool-format check only. No task scope/ACL, no approval gate."""
 
-    def propose(self, action, actor="model"):
-        with self.db:
-            error = self.schema_error(action)
-            if not error:
-                tool, args = action["tool"], action["args"]
-                if tool == "read_mail" and not self.db.execute(
-                    "SELECT 1 FROM mails WHERE id=?", (args["mail_id"],)
-                ).fetchone():
-                    error = "Record not found"
-                if tool == "lookup_user" and not self.db.execute(
-                    "SELECT 1 FROM users WHERE id=?", (args["user_id"],)
-                ).fetchone():
-                    error = "Record not found"
-            if error:
-                self.log(action, "blocked", error, actor=actor)
-                return {"status": "blocked", "reason": error}
-            return self.execute(action, actor=actor)
+    defense = False
 
 
 def well_formed(action):

@@ -49,6 +49,9 @@ TABLES = [
 
 
 class Service:
+    # False = Defense OFF baseline: tool-format check only, no task scope/ACL and
+    # no approval gate. Used for the undefended comparison, never as a default.
+    defense = True
 
     def __init__(self, path="data/demo.sqlite"):
         if path != ":memory:":
@@ -221,7 +224,30 @@ class Service:
             return "Mailbox denied"
         return None
 
+    def baseline_error(self, action):
+        """Defense OFF: the format check, plus 'the record exists' for reads."""
+        error = self.schema_error(action)
+        if error:
+            return error
+        tool, args = action["tool"], action["args"]
+        if tool == "read_mail" and not self.db.execute(
+            "SELECT 1 FROM mails WHERE id=?", (args["mail_id"],)
+        ).fetchone():
+            return "Record not found"
+        if tool == "lookup_user" and not self.db.execute(
+            "SELECT 1 FROM users WHERE id=?", (args["user_id"],)
+        ).fetchone():
+            return "Record not found"
+        return None
+
     def propose(self, action, actor="model"):
+        if not self.defense:
+            with self.db:
+                error = self.baseline_error(action)
+                if error:
+                    self.log(action, "blocked", error, actor=actor)
+                    return {"status": "blocked", "reason": error}
+                return self.execute(action, actor=actor)
         with self.db:
             error = self.policy(action)
             if error:
@@ -332,15 +358,27 @@ class Service:
             for t in TABLES
         }
 
-    def plan(self, mail, mode, mail_id="mail1"):
+    def plan(self, mail, mode, mail_id="mail1", defense=None):
+        """Run one onboarding task. defense=False runs this one task undefended."""
         from planner import run_onboarding
 
         if not isinstance(mail, str) or not mail.strip() or len(mail) > 8000:
             raise ValueError("Mail must contain 1 to 8000 characters")
+        if defense is not None and type(defense) is not bool:
+            raise ValueError("defense must be true or false")
         error = self.policy({"tool": "read_mail", "args": {"mail_id": mail_id}})
         if error:
             raise ValueError(error)
+        previous = self.defense
+        if defense is not None:
+            self.defense = defense
         try:
-            return run_onboarding(self, mail, mode, mail_id)
+            result = run_onboarding(self, mail, mode, mail_id)
+            result["defense"] = self.defense
+            if not self.defense:
+                self.audit({"defense": "off"}, "info",
+                           "Baseline run: no task scope/ACL and no approval gate")
+            return result
         finally:
+            self.defense = previous
             self.open_approvals(self.run_id)

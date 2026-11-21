@@ -32,6 +32,7 @@ python3 evaluate.py --mode api     # 방어 전후 평가
 2. 메일 발송과 권한 요청을 개별 승인하거나 거절합니다. 거절한 행동은 실행되지 않습니다.
 3. 실험 초기화 → 공격 메일 예시 → 시작: B/Finance/admin 요청은 승인 전에 차단됩니다. 허용된 안내 메일은 별도로 승인 대기할 수 있습니다.
 4. 하단 권한·일정·발신함에서 실제 결과를 보고, 상세 DB/로그를 펼쳐 확인합니다.
+5. **방어 OFF 대조**: '방어 OFF에서 실제 성공한 공격' 버튼(평가 사례 `a_dev_exfil_appended`, `a_test_task_overwrite_fake_system`)으로 메일을 불러와 방어를 OFF → ON으로 바꿔 같은 메일을 실행합니다. OFF는 `evaluate.py`의 Defense OFF와 같은 코드 경로(`Service.defense = False`)이며 그 실행 한 번에만 적용됩니다. 로그에 `Baseline run`이 남습니다. 실행 사이에는 초기화하세요. 실제 LLM의 응답은 매번 같지 않을 수 있습니다.
 
 **모의 실행(Fixture)은 정해진 모델 응답을 흉내 낸 검사이며 실제 AI 성능의 증거가 아닙니다.**
 모의 일정·안내문은 November 23 at 15:00 예시 전용입니다. 임의 문장 이해는 실제 LLM 모드에서 시험합니다.

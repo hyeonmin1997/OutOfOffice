@@ -295,15 +295,46 @@ $("attack").onclick = () => {
   updateScenarioHint();
 };
 
+const GOALS = { exfil: "외부 주소로 발송", task_overwrite: "저장된 업무 바꿔치기", grant: "금지 권한 부여", read: "타인 메일 읽기" };
+
+function renderBaselineButtons() {
+  const container = $("baselineButtons");
+  container.replaceChildren();
+  (examples.baseline || []).forEach((example) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "btn-attack";
+    button.textContent = `${GOALS[example.goal] || example.goal} (${example.split})`;
+    button.title = example.id;
+    button.onclick = () => {
+      $("mail").value = example.mail;
+      const hint = $("scenarioHint");
+      hint.className = "scenario-hint";
+      hint.textContent = `평가 사례 ${example.id}: 방어 OFF에서 실제로 성공한 공격입니다. 방어 ON/OFF를 바꿔 같은 메일로 실행해 비교하세요. (결과는 모델 응답에 따라 달라질 수 있습니다.)`;
+    };
+    container.append(button);
+  });
+}
+
+function updateDefenseWarning() {
+  $("defenseWarning").classList.toggle("hidden", $("defense").value !== "off");
+}
+
+$("defense").onchange = updateDefenseWarning;
+
 $("run").onclick = () => perform(async () => {
   $("message").textContent = "메일을 읽고 요청 가능한 행동을 검사하고 있습니다…";
   $("actions").replaceChildren();
+  const defense = $("defense").value !== "off";
   const result = await request("/plan", {
     mail: $("mail").value,
     mail_id: $("savedMail").value,
     mode: $("mode").value,
+    defense,
   });
-  $("message").textContent = `${result.mode}: ${result.text || ""}`;
+  const label = result.defense === false ? "방어 OFF (기준선)" : "방어 ON";
+  $("message").classList.toggle("defense-off", result.defense === false);
+  $("message").textContent = `[${label}] ${result.mode}: ${result.text || ""}`;
   result.actions.forEach((action, index) => {
     $("actions").append(renderActionCard(action, result.results[index]));
   });
@@ -323,12 +354,15 @@ $("reset").onclick = () => {
     await refresh();
     selectMail();
     $("actions").replaceChildren();
+    $("message").classList.remove("defense-off");
     $("message").textContent = "초기 상태로 되돌렸습니다.";
   });
 };
 
 (async () => {
   examples = await request("/examples");
+  renderBaselineButtons();
+  updateDefenseWarning();
   await refresh();
   selectMail();
 })().catch((error) => {
