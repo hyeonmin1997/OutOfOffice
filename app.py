@@ -113,16 +113,16 @@ def make_handler(service):
             except (urllib.error.URLError, TimeoutError):
                 self.reply(
                     {
-                        "error": "LLM 서버에 연결하지 못했습니다. Ollama가 실행 중인지, "
-                        "모델을 받았는지(ollama pull) 확인하세요. 이미 실행된 행동은 DB에서 확인하세요."
+                        "error": "Could not connect to the LLM server. Check that Ollama is running and "
+                        "the model is downloaded (ollama pull). Actions already run are in the DB."
                     },
                     503,
                 )
             except LLMResponseError:
                 self.reply(
                     {
-                        "error": "LLM 서버의 응답 형식이 올바르지 않습니다. 모델 이름과 "
-                        "엔드포인트(chat completions, tool calling 지원)를 확인하세요."
+                        "error": "The LLM server sent an unexpected response. Check the model name and "
+                        "the endpoint (chat completions with tool calling)."
                     },
                     502,
                 )
@@ -130,7 +130,7 @@ def make_handler(service):
                 # Do not expose provider responses or credentials through HTTP errors.
                 self.reply(
                     {
-                        "error": "실행 중 오류가 발생했습니다. DB 결과를 확인하고 API 설정을 점검하세요."
+                        "error": "The run failed. Check the DB results and the API settings."
                     },
                     500,
                 )

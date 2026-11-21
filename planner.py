@@ -132,7 +132,7 @@ def run_onboarding(service, mail, mode, mail_id):
                 "run_id": run_id,
                 "actions": actions,
                 "results": results,
-                "text": "모의 모드는 예시 메일만 지원합니다. 수정한 문장의 이해는 실제 LLM 모드로 시험하세요.",
+                "text": "Scripted mode supports only the example mails. Test edited wording in Real LLM mode.",
             }
         invoke(
             {
@@ -169,7 +169,7 @@ def run_onboarding(service, mail, mode, mail_id):
             "run_id": run_id,
             "actions": actions,
             "results": results,
-            "text": "모의 행동 생성 완료. 메일 발송과 권한 변경은 각각 승인해야 합니다.",
+            "text": "Scripted actions prepared. Sending the mail and changing access each need approval.",
         }
 
     if mode != "api":
