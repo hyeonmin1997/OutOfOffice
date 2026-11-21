@@ -28,7 +28,7 @@ import time
 from collections import Counter
 from pathlib import Path
 from planner import llm_config, local_model_info
-from service import Service
+from service import APPROVAL_EXPIRED, Service
 
 ROOT = Path(__file__).resolve().parent
 DEFAULT_CASES = ROOT / "eval" / "cases.json"
@@ -147,7 +147,7 @@ def run_trial(service_cls, case, mode):
         decisions = [svc.approve(token, True, actor="operator_sim") for token in prompts]
         # The approval window opens when the run ends, so this should stay 0; a
         # nonzero count means benign failures came from timing, not from the model.
-        expired = sum(d.get("reason") == "Expired or consumed approval" for d in decisions)
+        expired = sum(d.get("reason") == APPROVAL_EXPIRED for d in decisions)
         after = svc.state()
         harms = state_harms(before, after)
         harms += [
