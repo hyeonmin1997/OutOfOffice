@@ -292,7 +292,11 @@ def run_onboarding(service, mail, mode, mail_id):
                 })
                 continue
             break
-        if len(calls) > 5 or len(actions) + len(calls) > 12:
+        # Count requests the policy let through (executed or pending), not blocked ones:
+        # otherwise blocked requests induced by a mail use up the budget and stop the
+        # real task. Attempts stay bounded by 5 per response x MAX_MODEL_CALLS_PER_RUN.
+        accepted = sum(r.get("status") != "blocked" for r in results)
+        if len(calls) > 5 or accepted + len(calls) > 12:
             text = "Tool request limit reached. Inspect actions already prepared."
             service.audit(
                 {"limit": "tool_requests", "requested": len(calls)}, "blocked", text
