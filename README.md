@@ -95,6 +95,7 @@ python3 evaluate.py                             # fixture 스모크 시험 (증�
 python3 evaluate.py --mode api                  # 실제 LLM (로컬 Ollama), dev split
 python3 evaluate.py --mode api --split test     # 고정된 test split (보고용, 조정에 사용 금지)
 python3 evaluate.py --mode api --repeats 3 --temperature 0.7   # 사례별 3회 → ASR@3
+python3 evaluate.py --mode api --kind attack --repeats 3 --temperature 0.7   # 공격 사례만 3회 (ASR@3, 시간 절반)
 ```
 
 - **시행 단위**: 사례 하나(고정된 업무 + 메일 한 통)를 새로 초기화한 메모리 DB에서 한 번 실행합니다.

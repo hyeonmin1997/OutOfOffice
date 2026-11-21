@@ -357,6 +357,8 @@ def main():
     parser.add_argument("--temperature", default="0",
                         help="sampling temperature for the real LLM (default 0; '' = model default)")
     parser.add_argument("--repeats", type=int, default=1, help="runs per case (ASR@k)")
+    parser.add_argument("--kind", choices=["all", "attack", "benign"], default="all",
+                        help="run only this kind of case, e.g. attack for an ASR@k run")
     parser.add_argument("--out", type=Path, default=ROOT / "results")
     parser.add_argument("--yes", action="store_true", help="confirm calls to a remote endpoint")
     args = parser.parse_args()
@@ -371,12 +373,14 @@ def main():
     cases = json.loads(raw)
     if args.split != "all":
         cases = [c for c in cases if c["split"] == args.split]
+    if args.kind != "all":
+        cases = [c for c in cases if c["kind"] == args.kind]
     skipped = []
     if args.mode == "fixture":
         skipped = [c["id"] for c in cases if not c.get("fixture")]
         cases = [c for c in cases if c.get("fixture")]
     if not cases:
-        sys.exit(f"No cases for split={args.split} mode={args.mode}")
+        sys.exit(f"No cases for split={args.split} kind={args.kind} mode={args.mode}")
     if args.mode == "api" and args.split == "test" and git_info()["dirty"]:
         print("WARNING: uncommitted code changes. Commit before a test-split run so the "
               "result names the exact code; the diff hash is recorded meanwhile.")
@@ -384,6 +388,9 @@ def main():
     config, model_info = None, None
     if args.mode == "api":
         os.environ["LLM_TEMPERATURE"] = args.temperature
+        if args.repeats > 1 and args.temperature.strip() in ("0", "0.0"):
+            print("WARNING: --repeats > 1 at temperature 0 repeats the same answer, so ASR@k "
+                  "equals ASR. Use e.g. --temperature 0.7 for an ASR@k run.")
         try:
             config = llm_config()
         except ValueError as error:
@@ -422,7 +429,8 @@ def main():
     s_off, s_on = summarize(off), summarize(on, effective)
 
     label = "SMOKE TEST (fixture)" if args.mode == "fixture" else f"live LLM: {config['model']}"
-    print(f"=== OutOfOffice evaluation — {label} — split={args.split}, repeats={args.repeats} ===")
+    print(f"=== OutOfOffice evaluation — {label} — split={args.split}, kind={args.kind}, "
+          f"repeats={args.repeats} ===")
     print(f"{'Setting':<12} | {'Benign task success':<30} | {'Attack success (ASR)':<30} | "
           f"{'Unsafe requests':<30} | {'Prompts/task'}")
     print("-" * 126)
@@ -467,7 +475,8 @@ def main():
 
     args.out.mkdir(parents=True, exist_ok=True)
     stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-    path = args.out / f"{args.mode}_{args.split}_{stamp}.json"
+    kind = "" if args.kind == "all" else f"-{args.kind}"
+    path = args.out / f"{args.mode}_{args.split}{kind}_{stamp}.json"
     record = {
         "meta": {
             "mode": args.mode,
@@ -482,6 +491,7 @@ def main():
             "cases_sha256": hashlib.sha256(raw).hexdigest(),
             "split": args.split,
             "repeats": args.repeats,
+            "kind": args.kind,
             "skipped_cases": skipped,
             "operator_model": "approve every pending request (worst case)",
             "oracle_version": ORACLE_VERSION,
