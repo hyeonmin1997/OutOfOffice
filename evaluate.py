@@ -21,6 +21,7 @@ import argparse
 import datetime
 import hashlib
 import json
+import math
 import os
 import subprocess
 import sys
@@ -208,8 +209,24 @@ def run_setting(name, service_cls, cases, mode, repeats):
     return trials
 
 
+def wilson(num, den, z=1.96):
+    """95% Wilson score interval in percent, or None for an empty denominator.
+
+    With 20 attacks per split, or a handful of effective ones, a rate alone hides how
+    little it pins down: 0/2 is compatible with anything up to about 66%.
+    """
+    if not den:
+        return None
+    p = num / den
+    scale = 1 + z * z / den
+    centre = (p + z * z / (2 * den)) / scale
+    half = z * math.sqrt(p * (1 - p) / den + z * z / (4 * den * den)) / scale
+    return [round(max(0.0, centre - half) * 100, 1), round(min(1.0, centre + half) * 100, 1)]
+
+
 def rate(num, den):
-    return {"num": num, "den": den, "pct": round(num / den * 100, 1) if den else None}
+    return {"num": num, "den": den, "pct": round(num / den * 100, 1) if den else None,
+            "ci95": wilson(num, den)}
 
 
 def summarize(trials, effective=None):
@@ -250,8 +267,10 @@ def summarize(trials, effective=None):
             if benign else None
         ),
         "audit_complete": rate(sum(t["audit_complete"] for t in ok), len(ok)),
-        "approvals_expired": sum(t.get("approvals_expired", 0) for t in ok),
-        "max_trial_seconds": max((t.get("seconds", 0) for t in ok), default=None),
+        # None, not 0, when the trials predate these fields (older result files).
+        "approvals_expired": (sum(t["approvals_expired"] for t in ok if "approvals_expired" in t)
+                              if any("approvals_expired" in t for t in ok) else None),
+        "max_trial_seconds": max((t["seconds"] for t in ok if "seconds" in t), default=None),
         "model_calls": sum(t["model_calls"] for t in ok),
         "tokens": sum(t["tokens"] for t in ok),
     }
@@ -279,10 +298,12 @@ def git_info():
     }
 
 
-def fmt(r):
+def fmt(r, ci=True):
     if r is None or r["den"] == 0:
         return "N/A"
-    return f"{r['pct']:.1f}% ({r['num']}/{r['den']})"
+    text = f"{r['pct']:.1f}% ({r['num']}/{r['den']})"
+    interval = r.get("ci95") if ci else None
+    return text + (f" [{interval[0]:g}–{interval[1]:g}]" if interval else "")
 
 
 def rescore(path):
@@ -402,12 +423,13 @@ def main():
 
     label = "SMOKE TEST (fixture)" if args.mode == "fixture" else f"live LLM: {config['model']}"
     print(f"=== OutOfOffice evaluation — {label} — split={args.split}, repeats={args.repeats} ===")
-    print(f"{'Setting':<12} | {'Benign task success':<20} | {'Attack success (ASR)':<20} | "
-          f"{'Unsafe requests':<16} | {'Prompts/task'}")
-    print("-" * 92)
+    print(f"{'Setting':<12} | {'Benign task success':<30} | {'Attack success (ASR)':<30} | "
+          f"{'Unsafe requests':<30} | {'Prompts/task'}")
+    print("-" * 126)
     for name, s in (("Defense OFF", s_off), ("Defense ON", s_on)):
-        print(f"{name:<12} | {fmt(s['benign_task_success']):<20} | {fmt(s['attack_success']):<20} | "
-              f"{fmt(s['unsafe_request']):<16} | {s['approval_prompts_per_benign_task']}")
+        print(f"{name:<12} | {fmt(s['benign_task_success']):<30} | {fmt(s['attack_success']):<30} | "
+              f"{fmt(s['unsafe_request']):<30} | {s['approval_prompts_per_benign_task']}")
+    print("[lo–hi] = 95% Wilson interval, in %.")
     print()
     print(f"Effective attacks (succeed with Defense OFF): {len(effective)}/{len(attack_ids)}"
           + (f" — dead, reported separately: {', '.join(dead)}" if dead else ""))
