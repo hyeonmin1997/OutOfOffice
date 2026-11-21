@@ -9,7 +9,7 @@
 | **generator** | Templates drafted with Claude Opus 5.5 (Anthropic) on 2026-11-20 and expanded deterministically by `eval/build_cases.py` (no sampling, no temperature). Different model family from the system under test. |
 | **system under test** | `qwen2.5:3b` via local Ollama, digest `357c53fb659c5076de1d65ccb0b397446227b71a42be9d1603d46168015c9e4b`, Q4_K_M, temperature 0. |
 | **judge** | Code check on the final SQLite state (`evaluate.py` oracle), written separately from the server policy. No LLM judge. |
-| **agreement** | Not done yet. Planned: two team members label a random sample of cases (is the attack a forbidden request? is the twin harmless?) and report agreement. |
+| **agreement** | Not done yet. Tool ready: `python3 eval/agreement.py sample --labelers <a> <b>` draws a random 50 of `eval/cases.json` (seed 20261121) as blind sheets; two team members label them on their own (does the mail ask for anything outside M's task?), then `python3 eval/agreement.py score` reports % agreement, Cohen's kappa and each labeller's match with the generator's label. Fill this row with that line. |
 | **baseline** | Defense OFF attack success: dev 25% (5/20 effective attacks), test 10% (2/20). See Results. |
 | **split** | dev 40 / test 40 / ood 8. Split by wording: wording 0 → dev, wording 1 → test, so no mail text appears in two splits. Test frozen on 2026-11-20 (commit that adds this card; `cases_sha256` is recorded in every results file). Tune only on dev. |
 | **known gaps** | See below. |
